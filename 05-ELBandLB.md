@@ -1,73 +1,101 @@
-# AWS EC2: Elastic Load Balancing and Auto Scaling
+# Elastic Load Balancing and Amazon EC2 Auto Scaling
 
-## 1. What Is Load Balancing?
+## Elastic Load Balancing fundamentals
 
-**Load balancing** distributes incoming traffic across multiple servers, such as EC2 instances, to improve performance, scalability, and availability.
+**Load balancing** distributes incoming traffic across backend resources to improve performance, scalability, and availability. Clients connect to a single entry point, typically a DNS name, and the load balancer forwards traffic to registered targets. Health checks and deployment across multiple Availability Zones (AZs) help keep the application available when a target or zone fails.
 
-Instead of connecting directly to individual servers, users connect to a **Load Balancer**, which forwards requests to available servers.
+**Elastic Load Balancing (ELB)** is the AWS-managed service that provides load balancers. AWS maintains the load balancer infrastructure, scales its capacity, and manages its availability across enabled zones.
 
-### Benefits
+### Listeners, rules, and targets
 
-- **Traffic distribution:** Spreads requests across multiple servers.
-- **High availability:** Reduces downtime when individual servers fail.
-- **Health checks:** Identifies unhealthy instances.
-- **Single entry point:** Provides one DNS endpoint for an application.
-- **SSL/TLS termination:** Handles HTTPS encryption and decryption.
-- **Session stickiness:** Directs requests from the same client to the same server when needed.
-- **Multi-AZ support:** Distributes traffic across Availability Zones.
-- **Public/private traffic:** Supports internet-facing and internal architectures.
+- A **listener** accepts traffic on a configured protocol and port, such as HTTPS on port 443.
+- A **listener rule** determines what to do with matching traffic. For example, an Application Load Balancer can forward requests for `/users` to a specific target group.
+- A **target group** contains registered backends and defines settings such as the protocol, port, and health checks where applicable. Classic Load Balancers register EC2 instances directly.
 
-## 2. AWS Elastic Load Balancing (ELB)
+### Load balancer types
 
-**Elastic Load Balancing (ELB)** is an AWS-managed service that distributes incoming traffic across multiple targets.
-
-AWS manages the infrastructure, maintenance, scaling capacity, and high availability of the load balancer.
-
-### AWS Integrations
-
-- **EC2:** Virtual servers that process requests.
-- **Auto Scaling Groups:** Automatically add or remove EC2 instances.
-- **Amazon ECS:** Runs containerized applications.
-- **AWS Certificate Manager (ACM):** Manages SSL/TLS certificates.
-- **Amazon CloudWatch:** Monitors performance metrics.
-- **Amazon Route 53:** Provides DNS routing.
-- **AWS WAF:** Protects supported load balancers against web attacks.
-- **AWS Global Accelerator:** Improves global traffic routing.
-
-## 3. Types of AWS Load Balancers
-
-| Type | OSI Layer | Protocols | Main Use |
+| Load balancer | OSI layer | Traffic | Typical use |
 |---|---|---|---|
-| Application Load Balancer (ALB) | Layer 7 | HTTP, HTTPS, WebSocket | Websites, APIs, microservices |
-| Network Load Balancer (NLB) | Layer 4 | TCP, UDP, TLS | High-performance network traffic |
-| Gateway Load Balancer (GWLB) | Layer 3 | IP packets via GENEVE | Firewalls and security appliances |
-| Classic Load Balancer (CLB) | Layers 4 and 7 | HTTP, HTTPS, TCP, SSL | Legacy applications |
+| Application Load Balancer (ALB) | Layer 7 | HTTP and HTTPS, including WebSocket upgrades | Websites, APIs, and microservices that need content-based routing |
+| Network Load Balancer (NLB) | Layer 4 | TCP, UDP, TLS, QUIC, and combined-protocol listeners | High-volume, low-latency traffic or static IP addresses |
+| Gateway Load Balancer (GWLB) | Layer 3 | IP traffic carried to appliances using GENEVE | Traffic inspection through virtual appliances |
+| Classic Load Balancer (CLB) | Layers 4 and 7 | TCP, SSL, HTTP, and HTTPS | Legacy applications |
 
-**Key differences:**
+### Internet-facing and internal load balancers
 
-- **ALB:** Routes requests using HTTP information, such as URLs and headers.
-- **NLB:** Routes network connections with extremely low latency.
-- **GWLB:** Routes traffic through security appliances.
-- **CLB:** Previous-generation load balancer.
+ALBs, NLBs, and CLBs can use either scheme.
 
-### Internal vs. Internet-Facing
+- **Internet-facing** load balancers have publicly reachable addresses and can serve internet clients.
+- **Internal** load balancers have private addresses and serve clients with network access to the load balancer's VPC.
 
-- **Internet-facing:** Accepts traffic from the internet.
-- **Internal:** Provides private access within connected networks.
+Targets can use private IP addresses with either scheme. [AWS guide to load balancer schemes and routing](https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/how-elastic-load-balancing-works.html)
 
-## 4. Health Checks
+### AWS integrations
 
-**Health checks** determine whether backend targets are healthy enough to receive traffic.
+| Service | Role |
+|---|---|
+| Amazon EC2 | Runs application instances that receive traffic. |
+| Amazon EC2 Auto Scaling | Adds, removes, and replaces EC2 instances. |
+| Amazon Elastic Container Service (Amazon ECS) | Runs containerized applications that can receive load-balanced traffic. |
+| AWS Certificate Manager (ACM) | Manages TLS certificates. |
+| Amazon CloudWatch | Collects metrics and evaluates alarms. |
+| Amazon Route 53 | Routes DNS queries for an application domain to a load balancer. |
+| AWS WAF | Filters web requests for supported resources such as ALBs. |
+| AWS Global Accelerator | Improves global traffic routing for supported endpoints such as ALBs and NLBs. |
 
-### How They Work
+## Load balancer types in practice
 
-1. The load balancer checks a configured endpoint.
-2. The application responds.
-3. The response is evaluated against configured success criteria.
-4. After enough consecutive failures, the target is marked unhealthy.
-5. Traffic is normally redirected to healthy targets.
+### Application Load Balancer
 
-### Example
+An ALB routes requests using application-level information such as the path, hostname, HTTP headers, and query string. Listener rules can forward requests to different target groups or redirect HTTP requests to HTTPS. An HTTPS listener supports HTTP/2 from clients, and the ALB supports WebSocket upgrades.
+
+| Rule condition | Example | Destination |
+|---|---|---|
+| Path | `/users` | Users service |
+| Path | `/posts` | Posts service |
+| Hostname | `api.example.com` | API service |
+| Query string | `?role=admin` | Admin backend |
+| HTTP header | `X-App-Version: v2` | Version 2 of the application |
+
+ALB target types are **EC2 instance** (`instance`), **IP address** (`ip`), and **Lambda function** (`lambda`). Amazon ECS services use `instance` or `ip` targets depending on their network mode. Tasks using `awsvpc` use `ip` targets. [AWS ALB target group guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-target-groups.html)
+
+An ALB provides a DNS hostname such as this one.
+
+```text
+my-alb-123456.us-east-1.elb.amazonaws.com
+```
+
+The ALB passes client connection information to HTTP backends through forwarded headers.
+
+| Header | Information |
+|---|---|
+| `X-Forwarded-For` | Client IP information. By default, the ALB appends the client IP to any existing header value. |
+| `X-Forwarded-Port` | Destination port used by the client. |
+| `X-Forwarded-Proto` | Protocol used by the client, such as HTTP or HTTPS. |
+
+### Network Load Balancer
+
+An NLB distributes connections and flows at the transport layer. It handles high connection volumes with low latency and provides a static IP address per enabled AZ. For an internet-facing NLB, you can assign an Elastic IP address per enabled AZ for IPv4 traffic.
+
+NLB target groups support **EC2 instances**, **IP addresses**, and an **Application Load Balancer**. For instance and IP targets, health checks can use TCP, HTTP, or HTTPS. ALB targets use HTTP or HTTPS health checks. [AWS NLB listener guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-listeners.html) · [AWS NLB target group guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-target-groups.html)
+
+### Gateway Load Balancer
+
+A GWLB acts as a transparent network gateway and distributes IP traffic across virtual appliances such as firewalls, intrusion detection systems (IDS), intrusion prevention systems (IPS), and deep packet inspection (DPI) appliances. **GENEVE** encapsulates packets exchanged between the GWLB and its appliances over **UDP port 6081**. [AWS GWLB overview](https://docs.aws.amazon.com/elasticloadbalancing/latest/gateway/introduction.html)
+
+## Health checks and network access
+
+### Health checks
+
+**Health checks** determine whether a backend is healthy enough to receive traffic. Configure them on the target group for ALB, NLB, and GWLB, or on the load balancer for CLB.
+
+1. The load balancer checks the target at the configured protocol and port. HTTP checks also use a configured path and evaluate the response status code.
+2. After the configured number of consecutive failures, the target is marked unhealthy. The load balancer normally sends traffic to healthy targets.
+3. An unhealthy target can return to service after passing the configured number of consecutive checks.
+
+For a standard ALB HTTP health check, `200 OK` is the default success code. You can configure the accepted codes. If every registered target in an ALB target group is unhealthy across all enabled zones, the ALB can **fail open** and route to those targets. [AWS ALB health check guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/target-group-health-checks.html)
+
+This example checks an Express endpoint served over HTTP on port 4567.
 
 ```text
 Protocol: HTTP
@@ -82,582 +110,118 @@ app.get("/health", (req, res) => {
 });
 ```
 
-**Important:**
+### Security groups for a public ALB
 
-- HTTP health checks commonly expect a `200 OK` response.
-- Accepted success codes are configurable.
-- Health checks are configured through target groups.
-- Unhealthy targets can return to service after passing health checks.
+**Security groups** control inbound and outbound traffic. In this example, the public ALB accepts IPv4 web traffic and forwards it to EC2 instances on port 80.
 
-## 5. Load Balancer Security Groups
+| Security group | Direction | Protocol and port | Peer |
+|---|---|---|---|
+| ALB | Inbound | TCP 80 (HTTP) | `0.0.0.0/0` |
+| ALB | Inbound | TCP 443 (HTTPS) | `0.0.0.0/0` |
+| ALB | Outbound | TCP 80 (HTTP) | EC2 security group |
+| EC2 | Inbound | TCP 80 (HTTP) | ALB security group |
 
-**Security Groups** act as virtual firewalls that control incoming and outgoing traffic.
+Referencing the ALB security group in the EC2 inbound rule restricts access to the application port. If the health check uses a separate port, such as 4567 above, allow that port in the ALB outbound and EC2 inbound rules as well. [AWS ALB security group guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-update-security-groups.html)
 
-### Load Balancer Security Group
+## Traffic and connection behavior
 
-| Protocol | Port | Source |
-|---|---|---|
-| HTTP | 80 | `0.0.0.0/0` |
-| HTTPS | 443 | `0.0.0.0/0` |
+### Cross-zone load balancing
 
-### EC2 Security Group
+**Cross-zone load balancing** lets each load balancer node send traffic to targets in all enabled AZs. With cross-zone disabled, each node sends traffic only to targets in its own AZ.
 
-| Protocol | Port | Source |
-|---|---|---|
-| HTTP | 80 | Load Balancer Security Group |
+Suppose AZ 1 has two instances, AZ 2 has eight, and each zone's load balancer node receives 50 requests. With equal target capacity and even distribution among eligible targets, the average is as follows.
 
-This configuration allows public traffic to reach the load balancer while restricting direct access to application instances on the configured port.
-
-## 6. Application Load Balancer (ALB)
-
-An **Application Load Balancer** operates at **Layer 7 (Application Layer)**.
-
-It understands HTTP requests and can route them using application-level information.
-
-### Features
-
-- Supports HTTP, HTTPS, HTTP/2, and WebSocket.
-- Routes traffic based on URL paths, hostnames, headers, and query strings.
-- Supports HTTP-to-HTTPS redirects.
-- Integrates with Amazon ECS and containerized applications.
-- Routes requests to multiple target groups.
-
-### Routing Examples
-
-| Routing Type | Example | Destination |
-|---|---|---|
-| Path | `/users` | Users service |
-| Path | `/posts` | Posts service |
-| Hostname | `api.example.com` | API service |
-| Query | `?role=admin` | Admin backend |
-| Header | `X-App-Version: v2` | Version 2 application |
-
-### ALB Target Groups
-
-A **Target Group** contains backend resources receiving traffic.
-
-Supported target types:
-
-- **EC2 Instances:** Virtual servers.
-- **IP Addresses:** Supported private IP endpoints.
-- **Lambda Functions:** Serverless functions.
-
-Amazon ECS tasks can use instance or IP target types.
-
-### Important Components
-
-- **Listener:** Accepts requests on a configured protocol and port.
-- **Listener Rule:** Determines where a request should be routed.
-- **Target Group:** Contains the registered backend resources.
-
-### DNS and Client IP
-
-An ALB provides a DNS hostname such as:
-
-```text
-my-alb-123456.us-east-1.elb.amazonaws.com
-```
-
-ALBs forward client information using HTTP headers:
-
-| Header | Purpose |
-|---|---|
-| `X-Forwarded-For` | Client IP information |
-| `X-Forwarded-Port` | Original destination port |
-| `X-Forwarded-Proto` | Original HTTP/HTTPS protocol |
-
-## 7. Network Load Balancer (NLB)
-
-A **Network Load Balancer** operates at **Layer 4 (Transport Layer)**.
-
-### Features
-
-- Supports TCP, UDP, and TLS traffic.
-- Handles very high connection volumes.
-- Provides ultra-low latency.
-- Supports static IP addresses.
-- Supports assigning Elastic IP addresses per enabled AZ for internet-facing IPv4 configurations.
-
-### NLB Target Groups
-
-- **EC2 Instances**
-- **IP Addresses**
-- **Application Load Balancer**
-
-### Health Checks
-
-NLB supports TCP, HTTP, and HTTPS health checks.
-
-**Use NLB when:** An application requires high-performance network connections, TCP/UDP support, or stable IP addresses.
-
-## 8. Gateway Load Balancer (GWLB)
-
-A **Gateway Load Balancer** operates at **Layer 3 (Network Layer)**.
-
-It distributes network traffic through third-party virtual appliances.
-
-### Common Use Cases
-
-- Firewalls.
-- Intrusion Detection Systems (IDS).
-- Intrusion Prevention Systems (IPS).
-- Deep Packet Inspection (DPI).
-
-### Features
-
-- Acts as a transparent network gateway.
-- Distributes traffic across multiple network appliances.
-- Uses the **GENEVE protocol on UDP port 6081**.
-
-**GENEVE** encapsulates network packets so they can travel between a GWLB and security appliances.
-
-## 9. Sticky Sessions (Session Affinity)
-
-**Sticky Sessions** keep requests from the same client associated with the same backend target for a configured period.
-
-### Purpose
-
-Useful when applications store session information locally on an EC2 instance.
-
-### Supported Load Balancers
-
-- **ALB:** Cookie-based stickiness.
-- **CLB:** HTTP/HTTPS session stickiness.
-- **NLB:** Source-IP-based stickiness.
-
-### Cookie Types
-
-| Type | Cookie | Description |
-|---|---|---|
-| ALB Duration-Based | `AWSALB` | Generated by the ALB |
-| ALB Application-Based | `AWSALBAPP` | Generated by ALB alongside an application cookie |
-| CLB Duration-Based | `AWSELB` | Generated by the CLB |
-| Custom Application Cookie | Custom name | Generated by the application |
-
-### Disadvantages
-
-- Can produce uneven traffic distribution.
-- Creates dependency on individual instances.
-- Does not prevent session loss when an instance fails.
-
-**Best practice:** Prefer centralized session storage, such as Redis, for scalable applications.
-
-## 10. Cross-Zone Load Balancing
-
-**Cross-Zone Load Balancing** allows load balancer nodes in one Availability Zone to distribute requests across targets in other enabled Availability Zones.
-
-### Without Cross-Zone Load Balancing
-
-Each load balancer node distributes traffic only to targets in its own Availability Zone.
-
-### With Cross-Zone Load Balancing
-
-Each load balancer node can distribute traffic across targets in all enabled Availability Zones.
-
-### Example
-
-Assume:
-
-- AZ 1 has 2 EC2 instances.
-- AZ 2 has 8 EC2 instances.
-- Each AZ receives 50 requests.
-
-| Configuration | AZ 1: Requests per Instance | AZ 2: Requests per Instance |
+| Cross-zone setting | Requests per instance in AZ 1 | Requests per instance in AZ 2 |
 |---|---:|---:|
-| Without Cross-Zone | 25 | 6.25 |
-| With Cross-Zone | 10 | 10 |
+| Disabled | 25 | 6.25 |
+| Enabled | 10 | 10 |
 
-This assumes even traffic distribution and equal instance capacity.
-
-### Defaults
-
-| Load Balancer | Cross-Zone Behavior |
+| Load balancer | Default behavior |
 |---|---|
-| ALB | Enabled by default at load balancer level |
-| NLB | Disabled by default |
-| GWLB | Disabled by default |
-| CLB | Disabled by default |
+| ALB | Always enabled at the load balancer level. Eligible target groups can override this setting. |
+| NLB and GWLB | Disabled by default. |
+| CLB | Selected by default in the AWS console and disabled by default when created through the API or AWS CLI. |
 
-## 11. SSL/TLS and Certificates
+[AWS cross-zone load balancing guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/how-elastic-load-balancing-works.html#cross-zone-load-balancing)
 
-**TLS (Transport Layer Security)** encrypts network communication.
+### Sticky sessions
 
-SSL (Secure Sockets Layer) is its deprecated predecessor.
+**Sticky sessions**, also called **session affinity**, send requests or connections from the same client to the same backend while the affinity is active. This helps when an application stores session state locally on an instance.
 
-### Certificates
+| Load balancer | Mechanism |
+|---|---|
+| ALB | Duration-based stickiness uses the ALB-generated `AWSALB` cookie. Application-based stickiness uses a named cookie from the application alongside an ALB-generated cookie such as `AWSALBAPP-0`. |
+| CLB | For HTTP/HTTPS stickiness, the CLB generates an `AWSELB` cookie. Affinity can use a configured duration or follow the lifetime of a named application cookie. |
+| NLB | Supported listeners can use source-IP affinity. TLS and QUIC listeners have no stickiness support. |
 
-TLS certificates help clients verify server identity and establish secure connections.
+Affinity can concentrate traffic on individual targets. If a target fails, session state stored only on that target can be lost. A shared session store such as Redis lets any healthy instance serve the session. [AWS ALB target group attributes](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-target-group-attributes.html) · [AWS NLB target group attributes](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/edit-target-group-attributes.html) · [AWS CLB stickiness guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/classic/elb-sticky-sessions.html)
 
-Certificates are issued by **Certificate Authorities (CAs)** and have expiration dates.
+### TLS termination and certificates
 
-### AWS Certificate Manager (ACM)
+**Transport Layer Security (TLS)** encrypts network traffic. SSL is its deprecated predecessor, though AWS still uses the term in some settings. TLS certificates help clients verify the server's identity. Certificates issued by certificate authorities (CAs) have expiration dates. **AWS Certificate Manager (ACM)** can issue, import, and manage certificates and renew eligible ACM-issued certificates.
 
-ACM helps issue, import, manage, and renew eligible TLS certificates.
-
-### TLS Termination
-
-A load balancer can decrypt incoming HTTPS traffic before forwarding requests to backend instances.
+**TLS termination** occurs when a load balancer decrypts client traffic. For example, an ALB can forward the request over HTTP or open a separate HTTPS connection to the backend.
 
 ```text
 Client -- HTTPS --> Load Balancer -- HTTP/HTTPS --> EC2
 ```
 
-Backend communication can also use HTTPS when encryption is required.
+An NLB TLS listener can terminate TLS. An NLB TCP listener can pass encrypted traffic through for the target to terminate. [AWS NLB listener guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-listeners.html)
 
-### Server Name Indication (SNI)
+**Server Name Indication (SNI)** lets a client send the hostname during the TLS handshake so the load balancer can select a matching certificate.
 
-**SNI** allows a client to specify the requested hostname during the TLS handshake.
-
-This enables one load balancer to select different certificates for multiple domains.
-
-| Load Balancer | SNI Support |
+| Service | SNI support |
 |---|---|
-| ALB | Yes |
-| NLB | Yes, TLS listeners |
+| ALB | Yes, on HTTPS listeners |
+| NLB | Yes, on TLS listeners |
 | CLB | No |
-| CloudFront | Yes |
+| Amazon CloudFront | Yes, for viewer HTTPS when configured for SNI |
 
-## 12. Connection Draining (Deregistration Delay)
+### Connection draining and deregistration delay
 
-**Connection Draining** allows backend targets to finish existing requests before being removed from service.
+When a target is deregistered, the load balancer stops selecting it for new traffic and gives in-flight requests or connections time to finish. This helps during deployments and planned instance removal.
 
-- **CLB:** Connection Draining.
-- **ALB/NLB:** Deregistration Delay.
-
-### Behavior
-
-1. An instance begins deregistration.
-2. The load balancer stops selecting it for new traffic.
-3. Existing connections are given time to complete.
-4. The target is removed after completion or timeout.
-
-### Configuration
-
-- Default: **300 seconds**.
-- ALB/NLB target-group range: **0–3600 seconds**.
-- Setting `0` disables the waiting period.
-
-Useful for deployments and planned instance removal.
-
----
-
-# Amazon EC2 Auto Scaling Groups (ASG)
-
-## 13. What Is an Auto Scaling Group?
-
-An **Auto Scaling Group (ASG)** automatically manages the number of EC2 instances running in an application.
-
-Its purpose is to maintain sufficient computing capacity as application demand changes.
-
-### Main Responsibilities
-
-- **Scale Out:** Add EC2 instances when demand increases.
-- **Scale In:** Remove EC2 instances when demand decreases.
-- **Maintain capacity:** Keep the desired number of instances running within configured limits.
-- **Replace unhealthy instances:** Launch replacements when instances fail health checks or terminate.
-- **Load balancer integration:** Automatically register and deregister instances with configured target groups.
-
-### Example
-
-An application normally uses two EC2 instances.
-
-During peak traffic:
-
-1. CPU usage increases.
-2. Auto Scaling launches additional instances.
-3. The load balancer distributes traffic across the available instances.
-4. When demand decreases, Auto Scaling removes unnecessary instances.
-
-**Cost:** The Auto Scaling Group itself has no additional service charge. You pay for EC2 instances and other AWS resources it uses.
-
-## 14. Auto Scaling Group Configuration
-
-An ASG consists of several important configuration components.
-
-### Launch Template
-
-A **Launch Template** defines how new EC2 instances should be created.
-
-It can specify:
-
-- **AMI:** Operating system and machine image.
-- **Instance Type:** CPU, memory, and hardware configuration.
-- **User Data:** Startup scripts executed when an instance launches.
-- **EBS Volumes:** Storage configuration.
-- **Security Groups:** Network access rules.
-- **SSH Key Pair:** Credentials for SSH access.
-- **IAM Role:** AWS permissions assigned through an instance profile.
-- **Network settings:** Network interfaces and related settings.
-
-VPC subnets and load balancer target-group associations are typically configured at the ASG level rather than inside the Launch Template.
-
-**Note:** Launch Templates are preferred over older Launch Configurations.
-
-### ASG Capacity Settings
-
-| Attribute | Description |
-|---|---|
-| Minimum Capacity | Minimum number of instances maintained |
-| Maximum Capacity | Maximum number of instances allowed |
-| Desired Capacity | Number of instances the ASG attempts to maintain |
-
-### Example
-
-```text
-Minimum Capacity: 2
-Desired Capacity: 3
-Maximum Capacity: 6
-```
-
-The ASG attempts to maintain three instances under normal conditions but can scale between two and six based on its policies.
-
-## 15. CloudWatch Alarms and Auto Scaling
-
-**Amazon CloudWatch** monitors application and infrastructure metrics.
-
-CloudWatch alarms can trigger scaling policies when metrics cross configured thresholds.
-
-### Example
-
-```text
-Metric: Average CPU Utilization
-
-CPU > 70%  → Scale Out
-CPU < 30%  → Scale In
-```
-
-### How It Works
-
-1. CloudWatch collects metrics from EC2 instances.
-2. A CloudWatch alarm evaluates a metric against a threshold.
-3. The alarm changes state when its conditions are met.
-4. A configured scaling policy adjusts the desired capacity.
-5. The ASG launches or terminates instances as needed.
-
-CPU metrics for an ASG can represent average utilization across its instances.
-
-**Important:** Not every scaling policy requires manually creating CloudWatch alarms. Target tracking policies automatically manage their associated alarms.
-
-## 16. Auto Scaling Policies
-
-Scaling policies define **when and how** an Auto Scaling Group adjusts capacity.
-
-### Dynamic Scaling
-
-Automatically adjusts capacity based on application metrics.
-
-#### Target Tracking Scaling
-
-Attempts to maintain a metric near a target value.
-
-Example:
-
-```text
-Target Average CPU: 40%
-```
-
-- CPU rises above target → Add capacity.
-- CPU falls below target → Remove capacity when appropriate.
-
-This is generally the simplest dynamic scaling method.
-
-#### Simple Scaling
-
-Uses CloudWatch alarms to execute a scaling adjustment.
-
-Example:
-
-```text
-CPU > 70% → Add 2 instances
-CPU < 30% → Remove 1 instance
-```
-
-Simple scaling uses cooldown periods to reduce repeated scaling actions.
-
-#### Step Scaling
-
-Adjusts capacity according to how far a metric exceeds a threshold.
-
-Example:
-
-| CPU Utilization | Action |
-|---|---|
-| 60–70% | Add 1 instance |
-| 70–85% | Add 2 instances |
-| Above 85% | Add 4 instances |
-
-Step scaling supports different scaling adjustments based on alarm thresholds.
-
-### Scheduled Scaling
-
-**Scheduled Scaling** adjusts capacity at predefined times.
-
-Useful for predictable traffic patterns.
-
-Example:
-
-```text
-Friday at 5 PM:
-Minimum Capacity = 10
-```
-
-The ASG increases its minimum capacity according to the schedule.
-
-### Predictive Scaling
-
-**Predictive Scaling** uses historical traffic patterns to forecast demand and scale capacity ahead of expected increases.
-
-It is useful for applications with recurring traffic patterns.
-
-## 17. Good Metrics for Auto Scaling
-
-Choosing the right metric helps applications scale efficiently.
-
-| Metric | Description | Best For |
+| Load balancer | Setting | Timeout |
 |---|---|---|
-| CPUUtilization | Average CPU usage across instances | CPU-intensive applications |
-| ALBRequestCountPerTarget | Average requests per target | HTTP applications behind ALB |
-| Network In/Out | Network traffic volume | Network-intensive applications |
-| Custom CloudWatch Metrics | Application-specific measurements | Specialized workloads |
+| ALB and NLB | Target group deregistration delay | Defaults to 300 seconds. The usual range is 0–3,600 seconds, with 0 removing the wait. NLB QUIC traffic uses a fixed 300 seconds. |
+| CLB | Connection draining | When enabled, defaults to 300 seconds and accepts 1–3,600 seconds. |
 
-### CPU Utilization
+For NLB, a separate target group attribute controls whether the load balancer terminates remaining connections when the delay expires. [AWS ALB target group attributes](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-target-group-attributes.html) · [AWS NLB target group guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-target-groups.html) · [AWS CLB connection draining guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/classic/config-conn-drain.html)
 
-CPU utilization measures how much processing capacity EC2 instances are using.
+## Amazon EC2 Auto Scaling groups
 
-Example:
+An **Auto Scaling group (ASG)** manages a fleet of EC2 instances. It maintains desired capacity within configured limits and replaces instances that fail its configured health checks or terminate. **Scaling out** adds instances, and **scaling in** removes them. The ASG itself has no additional service charge. You pay for the EC2 instances and any other AWS resources used.
 
-```text
-Target CPU: 40%
-```
+### Launch templates
 
-The ASG adjusts capacity to keep average CPU usage near 40%.
+A **launch template** defines how to launch EC2 instances. It can specify the following settings.
 
-### Request Count per Target
-
-**ALBRequestCountPerTarget** measures the average number of requests received by targets in an ALB target group.
-
-Example:
-
-```text
-Target Value: 1000 requests per target
-```
-
-If traffic increases, Auto Scaling can add EC2 instances to distribute the workload.
-
-### Network In/Out
-
-Useful for applications limited by network bandwidth.
-
-- **NetworkIn:** Incoming network traffic.
-- **NetworkOut:** Outgoing network traffic.
-
-### Custom Metrics
-
-You can publish application-specific metrics to CloudWatch.
-
-Examples:
-
-- Number of active jobs.
-- Queue backlog.
-- Requests waiting to be processed.
-
-## 18. Scaling Cooldowns
-
-A **Scaling Cooldown** is a waiting period used by certain scaling policies to prevent repeated scaling actions before the system has stabilized.
-
-### Purpose
-
-- Prevent excessive scaling actions.
-- Allow newly launched instances to become operational.
-- Give monitoring metrics time to reflect changes in capacity.
-
-### Configuration
-
-For EC2 Auto Scaling simple scaling policies:
-
-- Default cooldown: **300 seconds**.
-- Cooldown duration can be configured.
-
-### Example
-
-1. CPU exceeds 70%.
-2. The ASG launches two instances.
-3. A cooldown period begins.
-4. Additional simple scaling actions are restricted while the cooldown applies.
-5. Scaling can resume according to policy behavior after the cooldown.
-
-### Important Considerations
-
-- Target tracking and step scaling use different mechanisms for managing scaling activity.
-- Cooldowns do not prevent every possible scaling or instance replacement action.
-- **Instance Warmup** is particularly important for modern scaling policies.
-
-**Best practice:** Use an AMI with necessary application dependencies preinstalled to reduce startup time.
-
-## 19. Instance Refresh
-
-**Instance Refresh** is an Auto Scaling feature that gradually replaces existing EC2 instances with instances using updated configurations.
-
-### Common Use Cases
-
-- Deploying a new AMI.
-- Updating application dependencies.
-- Changing instance configuration.
-- Rolling out a new Launch Template version.
-
-### How It Works
-
-1. Update the Launch Template with the new configuration.
-2. Configure the ASG to use the updated template version.
-3. Start an Instance Refresh.
-4. The ASG replaces existing instances in batches according to its refresh settings.
-5. New instances launch using the updated configuration.
-6. The process continues until the refresh completes.
-
-### Minimum Healthy Percentage
-
-Controls how much instance capacity should remain healthy during the refresh.
-
-Example:
-
-```text
-Minimum Healthy Percentage: 60%
-```
-
-The ASG attempts to preserve at least 60% healthy capacity during replacement, subject to the refresh configuration and capacity limits.
-
-### Instance Warmup
-
-**Instance Warmup** specifies how long new instances need before they are considered ready for the relevant scaling or refresh calculations.
-
-Example:
-
-```text
-Instance Warmup: 120 seconds
-```
-
-A newly launched instance gets time to initialize before the refresh progresses further.
-
-### Benefits
-
-- Supports controlled rolling deployments.
-- Reduces the need to replace all instances simultaneously.
-- Maintains application capacity during infrastructure updates.
-- Can use health checks and refresh preferences to control rollout progress.
-
-## 20. ELB and ASG Integration
-
-Elastic Load Balancing and Auto Scaling Groups are commonly used together.
-
-| Service | Responsibility |
+| Setting | Purpose |
 |---|---|
-| ELB | Distributes incoming requests across healthy targets |
-| ASG | Manages the number of EC2 instances |
-| CloudWatch | Provides monitoring metrics and alarms |
-| Launch Template | Defines how EC2 instances are created |
-| Target Group | Connects backend instances to the load balancer |
+| Amazon Machine Image (AMI) | Provides the operating system and any software included in the image. |
+| Instance type | Determines available CPU, memory, and hardware. |
+| User data | Provides startup scripts or initialization configuration. |
+| Amazon EBS volumes | Defines block storage. |
+| Security groups | Control network access. |
+| EC2 key pair | Configures key-based SSH access when used by the instance. |
+| IAM instance profile | Supplies the IAM role and its permissions to the instance. |
+| Network settings | Configure network interfaces and related options. |
 
-### Example Architecture
+Select the VPC subnets and load balancer attachments when configuring the ASG. Launch templates are the current option for new groups. Launch configurations are legacy.
+
+### Capacity settings
+
+| Setting | Purpose | Example |
+|---|---|---:|
+| Minimum capacity | Lower bound on desired capacity | 2 |
+| Desired capacity | Number of instances the group attempts to maintain | 3 |
+| Maximum capacity | Upper bound on desired capacity | 6 |
+
+In this example, the group initially aims to maintain three instances. A scaling policy can change desired capacity within the range of two to six instances.
+
+## Elastic Load Balancing and Auto Scaling integration
+
+When you attach an ASG to an ALB target group, Auto Scaling registers and deregisters instances as they enter and leave service. The ALB handles request routing, while the ASG manages EC2 capacity. An ASG uses EC2 health checks by default. Enable ELB health checks on the ASG if you also want it to replace instances that the load balancer reports as unhealthy. The **health check grace period** gives new instances time to initialize before Auto Scaling acts on those optional health check failures. [AWS Auto Scaling health check guide](https://docs.aws.amazon.com/autoscaling/ec2/userguide/health-checks-overview.html)
 
 ```mermaid
 flowchart TD
@@ -678,53 +242,64 @@ flowchart TD
     H --> ASG
 ```
 
-### How the Services Work Together
+For example, an application normally runs on two instances. When peak traffic pushes average CPU utilization high enough to trigger a scaling policy, the ASG increases desired capacity and launches instances. The ALB routes traffic to the new targets once they are healthy. When demand falls and the policy scales in, the ASG removes excess instances and deregisters them from the target group.
 
-1. Users send requests to the ALB.
-2. The ALB forwards requests to healthy EC2 instances.
-3. CloudWatch monitors performance metrics.
-4. Scaling policies adjust the ASG's desired capacity.
-5. The ASG launches or terminates EC2 instances.
-6. Registered target groups are updated as instances enter or leave service.
+## Scaling policies and metrics
 
-## 21. AWS Certification Key Concepts
+### CloudWatch alarms
 
-| Concept | Important Detail |
+**Amazon CloudWatch** collects metrics such as average EC2 CPU utilization for an ASG. For alarm-based scaling, an alarm evaluates a metric against its threshold over configured periods. When the alarm enters the alarm state, it can trigger a scaling policy that changes desired capacity. The ASG then launches or terminates instances as needed. For target tracking, Auto Scaling creates and manages the associated alarms.
+
+### Dynamic scaling
+
+- **Target tracking** aims to keep a metric near a target value. With a target of 40% average CPU utilization, the policy adds capacity when CPU usage grows and reduces capacity when it falls sufficiently. This is generally the simplest dynamic scaling option.
+- **Simple scaling** applies one fixed adjustment per policy in response to a CloudWatch alarm. For example, one policy can add two instances above 70% CPU utilization, and another can remove one instance below 30%. A scaling cooldown limits repeated simple scaling actions.
+- **Step scaling** chooses an adjustment based on how far the metric is from the alarm threshold. The table shows an example scale-out policy with a 60% threshold.
+
+| Average CPU utilization | Scale-out adjustment |
 |---|---|
-| ELB | Distributes traffic across available targets |
-| ALB | Layer 7, HTTP/HTTPS, path-based routing |
-| NLB | Layer 4, TCP/UDP/TLS, static IPs |
-| GWLB | Layer 3, security appliances, GENEVE port 6081 |
-| CLB | Legacy load balancer |
-| Health Checks | Monitor target availability |
-| Target Groups | Registered backend resources |
-| Sticky Sessions | Maintain client-to-target affinity |
-| Cross-Zone Load Balancing | Distributes traffic across Availability Zones |
-| TLS Termination | Handles HTTPS encryption at the load balancer |
-| ACM | Manages TLS certificates |
-| SNI | Selects certificates for multiple hostnames |
-| Deregistration Delay | Allows existing requests time to finish |
-| ASG | Automatically manages EC2 instance capacity |
-| Scale Out | Add instances |
-| Scale In | Remove instances |
-| Launch Template | Defines EC2 instance configuration |
-| Minimum Capacity | Minimum running instances |
-| Maximum Capacity | Maximum allowed instances |
-| Desired Capacity | Target number of instances |
-| Target Tracking | Maintains a metric near a target value |
-| Step Scaling | Adjusts capacity based on metric thresholds |
-| Scheduled Scaling | Adjusts capacity at predefined times |
-| Predictive Scaling | Forecasts future capacity requirements |
-| CloudWatch Alarms | Trigger alarm-based scaling actions |
-| Scaling Cooldown | Reduces repeated simple scaling actions |
-| Instance Warmup | Allows new instances time to initialize |
-| Instance Refresh | Gradually replaces instances with updated configurations |
+| At least 60%, below 70% | Add one instance |
+| At least 70%, below 85% | Add two instances |
+| At least 85% | Add four instances |
 
-### Key Distinctions
+### Scheduled and predictive scaling
 
-- **Load Balancer vs. ASG:** ELB distributes traffic; ASG adjusts EC2 capacity.
-- **Scaling vs. Load Balancing:** Scaling changes the number of servers; load balancing distributes requests among them.
-- **Scale Out vs. Scale In:** Add instances versus remove instances.
-- **Target Tracking vs. Step Scaling:** Maintain a target metric versus execute adjustments based on thresholds.
-- **Cooldown vs. Warmup:** Cooldown limits repeated scaling actions; warmup allows new instances time to become operational.
-- **Instance Refresh vs. Auto Scaling:** Instance Refresh updates the running fleet; Auto Scaling adjusts its capacity.
+- **Scheduled scaling** changes minimum, maximum, or desired capacity at predefined times. For example, a recurring Friday 5 p.m. action can raise minimum capacity to 10 ahead of a predictable traffic increase.
+- **Predictive scaling** forecasts demand from historical patterns and can increase capacity before recurring traffic peaks.
+
+### Choosing a scaling metric
+
+Choose a metric that reflects demand on the fleet. For target tracking, the metric should respond to changes in capacity. For example, adding instances should reduce the average workload per instance when total demand stays constant.
+
+| Metric | What it measures | Typical workload |
+|---|---|---|
+| `ASGAverageCPUUtilization` | Average EC2 CPU utilization across the group | CPU-intensive services |
+| `ALBRequestCountPerTarget` | Average request count per target in a specific ALB target group | HTTP services, for example a target of 1,000 requests per target per minute |
+| `ASGAverageNetworkIn` and `ASGAverageNetworkOut` | Average bytes received or sent per instance | Network-intensive services |
+| Custom CloudWatch metrics | Application-specific demand, such as active jobs, queue backlog, or waiting requests | Workers and specialized services |
+
+For target tracking on queued work, **backlog per instance** is a useful way to express the load each worker needs to handle. [AWS target tracking metric guide](https://docs.aws.amazon.com/autoscaling/ec2/userguide/as-scaling-target-tracking.html)
+
+### Scaling cooldown and instance warmup
+
+- **Scaling cooldown** gives capacity changes time to affect metrics before another simple scaling action can take effect. For example, after an alarm triggers the addition of two instances, the group applies its configured cooldown. The default is **300 seconds**. Unhealthy instance replacement can proceed during a cooldown.
+- **Instance warmup** gives new instances time to initialize after they enter `InService`. For target tracking and step scaling, warming instances are excluded from aggregated EC2 usage metrics until warmup ends. These policies can still scale out when needed, while dynamic scale-in waits for warmup to finish.
+
+An AMI with application dependencies preinstalled can shorten startup time. [AWS scaling cooldown guide](https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-scaling-cooldowns.html) · [AWS instance warmup guide](https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-default-instance-warmup.html)
+
+## Instance refresh
+
+An **instance refresh** rolls out an updated configuration across an existing Auto Scaling group. Use it to deploy a new AMI, update application dependencies, or apply other changes in a new launch template version.
+
+1. Create a launch template version with the updated configuration.
+2. Start an instance refresh and specify that version as the desired configuration.
+3. Auto Scaling replaces existing instances in batches according to the refresh settings. It waits for replacement instances to pass health checks and finish warming up before proceeding.
+4. After a successful refresh, the group's configuration reflects the specified launch template version.
+
+| Setting | Effect | Example |
+|---|---|---|
+| Minimum healthy percentage | Sets the lower bound on healthy capacity during replacement, as a percentage of desired capacity. | At 60%, the group aims to keep at least 60% of desired capacity healthy. |
+| Maximum healthy percentage | Limits how much capacity can be present during the rollout and helps determine how many replacements can launch in parallel. | A value above 100% can allow replacement instances to launch before old ones terminate. |
+| Instance warmup | Sets how long a new instance gets to initialize before the refresh can progress. | 120 seconds |
+
+These settings let you control the pace of a rolling deployment and preserve enough capacity to serve traffic while instances are replaced. [AWS instance refresh guide](https://docs.aws.amazon.com/autoscaling/ec2/userguide/instance-refresh-overview.html)
